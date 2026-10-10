@@ -1,27 +1,72 @@
+
 import os
 
+import streamlit as st
 from dotenv import load_dotenv
 from openai import OpenAI
+
 
 # =========================================================
 # 1. LOAD NEOSTATS API CONFIGURATION
 # =========================================================
+
 PROJECT_DIR = os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))
 )
 
+# Load local environment variables from .env.
+# On Streamlit Cloud, configuration comes from st.secrets.
 load_dotenv(os.path.join(PROJECT_DIR, ".env"))
 
-endpoint = os.getenv("NEOSTATS_ENDPOINT")
-api_key = os.getenv("NEOSTATS_API_KEY")
-model_name = os.getenv("NEOSTATS_MODEL")
+
+def get_config(name):
+    """
+    Read configuration from environment variables first,
+    then fall back to Streamlit Secrets.
+    """
+
+    value = os.getenv(name)
+
+    if value:
+        return value
+
+    try:
+        value = st.secrets.get(name)
+
+        if value:
+            return str(value)
+
+    except Exception:
+        # Streamlit Secrets may not exist in local development.
+        pass
+
+    return None
+
+
+endpoint = get_config("NEOSTATS_ENDPOINT")
+api_key = get_config("NEOSTATS_API_KEY")
+model_name = get_config("NEOSTATS_MODEL")
+
 
 if not endpoint or not api_key or not model_name:
+    missing = []
+
+    if not endpoint:
+        missing.append("NEOSTATS_ENDPOINT")
+
+    if not api_key:
+        missing.append("NEOSTATS_API_KEY")
+
+    if not model_name:
+        missing.append("NEOSTATS_MODEL")
+
     raise RuntimeError(
-        "Missing NeoStats API configuration. "
-        "Please check NEOSTATS_ENDPOINT, "
-        "NEOSTATS_API_KEY, and NEOSTATS_MODEL in your .env file."
+        "Missing NeoStats API configuration: "
+        + ", ".join(missing)
+        + ". Configure these values in your local .env "
+        "file or Streamlit Cloud Secrets."
     )
+
 
 client = OpenAI(
     base_url=endpoint,
@@ -32,6 +77,7 @@ client = OpenAI(
 # =========================================================
 # 2. RIDEWISE ASSISTANT INSTRUCTIONS
 # =========================================================
+
 SYSTEM_PROMPT = """
 You are RideWise Assist, a friendly and professional
 customer support assistant for a vehicle rental service.
@@ -114,19 +160,25 @@ naturally and accurately, not to reproduce a policy document.
 # =========================================================
 # 3. ASK THE NEOSTATS-HOSTED LLM
 # =========================================================
+
 def ask_llm(question, context=""):
     """
     Generate a customer-friendly response using the
     NeoStats-hosted LLM and the evidence retrieved by RAG.
     """
 
+    if not isinstance(question, str):
+        return "Please enter a valid question."
+
     question = question.strip()
 
     if not question:
         return "Please enter a question so I can help you."
 
-    evidence = context.strip() if context else (
-        "No additional evidence was provided."
+    evidence = (
+        context.strip()
+        if isinstance(context, str) and context.strip()
+        else "No additional evidence was provided."
     )
 
     messages = [
@@ -168,7 +220,9 @@ def ask_llm(question, context=""):
 # =========================================================
 # 4. BASIC CONNECTION AND RESPONSE-STYLE TEST
 # =========================================================
+
 if __name__ == "__main__":
+
     test_question = "How is the late return fee calculated?"
 
     # Use the example from the supplied policy context.
@@ -188,8 +242,14 @@ if __name__ == "__main__":
 
     try:
         answer = ask_llm(test_question, test_context)
+
         print("\nRideWise Assist response:\n")
         print(answer)
 
     except Exception as error:
-        print(f"NeoStats LLM request failed: {error}")
+        # Avoid printing credentials or sensitive configuration.
+        print(
+            "NeoStats LLM request failed. Check your API "
+            "configuration, endpoint, model name, and API access."
+        )
+        print(f"Error type: {type(error).__name__}")
